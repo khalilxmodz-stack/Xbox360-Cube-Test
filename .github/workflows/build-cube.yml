@@ -10,7 +10,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
       - name: Checkout project
@@ -20,12 +20,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential bison flex texinfo \
+            build-essential \
+            bison flex texinfo \
             libgmp-dev libmpfr-dev libmpc-dev \
-            curl xz-utils patch python3 cmake ninja-build git \
-            gawk
+            curl xz-utils patch python3 \
+            cmake ninja-build git gawk
 
-      - name: Download Xbox 360 SDK
+      - name: Download XSDK
         run: |
           git clone --depth 1 \
             https://github.com/xenosworks/xsdk.git xsdk
@@ -44,41 +45,62 @@ jobs:
 
           bash tools/toolchain/build.sh
 
-      - name: Check toolchain output
+      - name: Build compatible glslang
+        shell: bash
         run: |
-          echo "Checking for compiler..."
-          if [ -d "$HOME/xsdk-gcc" ]; then
-            find "$HOME/xsdk-gcc" -maxdepth 4 \
-              -type f \( -name '*gcc' -o -name '*g++' \) \
-              -print
-          else
-            echo "Toolchain output directory was not created."
-            exit 1
-          fi
+          set -e
+
+          git clone --depth 1 --branch xenon \
+            https://github.com/xenosworks/glslang-xenon.git \
+            glslang-xenon
+
+          cd glslang-xenon
+
+          python3 update_glslang_sources.py
+
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_OPT=ON \
+            -DSPIRV_SKIP_EXECUTABLES=ON \
+            -DGLSLANG_TESTS=OFF
+
+          cmake --build build -j2
+
+          mkdir -p "$HOME/xsdk-gcc/bin"
+          cp build/StandAlone/glslang \
+            "$HOME/xsdk-gcc/bin/glslang"
+
+          chmod +x "$HOME/xsdk-gcc/bin/glslang"
+          echo "$HOME/xsdk-gcc/bin" >> "$GITHUB_PATH"
+
+          "$HOME/xsdk-gcc/bin/glslang" --version
 
       - name: Build XSDK
         shell: bash
         run: |
           set -e
           cd xsdk
-          make -j2
+
+          make -j2 TOOLCHAIN="$HOME/xsdk-gcc"
 
       - name: Build sample projects
         shell: bash
         run: |
           set -e
           cd xsdk
-          make samples -j2
+
+          make samples -j2 TOOLCHAIN="$HOME/xsdk-gcc"
 
       - name: Find generated XEX files
         shell: bash
         run: |
           set -e
+
           find xsdk -type f -iname '*.xex' -print \
             | tee xex-files.txt
 
-          if [ ! -s xex-files.txt ]; then
-            echo "No XEX files were generated."
+          if ! grep -q '\.xex$' xex-files.txt; then
+            echo "ERROR: No XEX files were generated."
             exit 1
           fi
 
