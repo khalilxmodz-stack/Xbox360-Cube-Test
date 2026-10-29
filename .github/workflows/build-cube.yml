@@ -1,0 +1,54 @@
+
+name: Xbox 360 Cube Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bison flex texinfo \
+            libgmp-dev libmpfr-dev libmpc-dev \
+            curl xz-utils patch python3 cmake ninja-build git
+
+      - name: Download xsdk
+        run: |
+          git clone --depth 1 \
+            https://github.com/xenosworks/xsdk.git xsdk
+
+      - name: Build Xbox 360 toolchain
+        run: |
+          cd xsdk
+          PREFIX="$HOME/xsdk-gcc" \
+          WORK="$HOME/xsdk-gcc-work" \
+          JOBS=2 tools/toolchain/build.sh
+
+      - name: Build xsdk
+        run: |
+          cd xsdk
+          make -j2
+
+      - name: Build cube sample
+        run: |
+          cd xsdk
+          make samples -j2
+
+      - name: Upload cube XEX
+        uses: actions/upload-artifact@v4
+        with:
+          name: Xbox360-Cube-Test-XEX
+          path: xsdk/build/samples/cube/cube.xex
+          if-no-files-found: error
