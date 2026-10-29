@@ -22,33 +22,71 @@ jobs:
           sudo apt-get install -y \
             build-essential bison flex texinfo \
             libgmp-dev libmpfr-dev libmpc-dev \
-            curl xz-utils patch python3 cmake ninja-build git
+            curl xz-utils patch python3 cmake ninja-build git \
+            gawk
 
-      - name: Download xsdk
+      - name: Download Xbox 360 SDK
         run: |
           git clone --depth 1 \
             https://github.com/xenosworks/xsdk.git xsdk
 
       - name: Build Xbox 360 toolchain
+        shell: bash
         run: |
+          set -e
           cd xsdk
-          PREFIX="$HOME/xsdk-gcc" \
-          WORK="$HOME/xsdk-gcc-work" \
-          JOBS=2 tools/toolchain/build.sh
 
-      - name: Build xsdk
+          chmod +x tools/toolchain/build.sh
+
+          export PREFIX="$HOME/xsdk-gcc"
+          export WORK="$HOME/xsdk-gcc-work"
+          export JOBS=2
+
+          bash tools/toolchain/build.sh
+
+      - name: Check toolchain output
         run: |
+          echo "Checking for compiler..."
+          if [ -d "$HOME/xsdk-gcc" ]; then
+            find "$HOME/xsdk-gcc" -maxdepth 4 \
+              -type f \( -name '*gcc' -o -name '*g++' \) \
+              -print
+          else
+            echo "Toolchain output directory was not created."
+            exit 1
+          fi
+
+      - name: Build XSDK
+        shell: bash
+        run: |
+          set -e
           cd xsdk
           make -j2
 
-      - name: Build cube sample
+      - name: Build sample projects
+        shell: bash
         run: |
+          set -e
           cd xsdk
           make samples -j2
 
-      - name: Upload cube XEX
+      - name: Find generated XEX files
+        shell: bash
+        run: |
+          set -e
+          find xsdk -type f -iname '*.xex' -print \
+            | tee xex-files.txt
+
+          if [ ! -s xex-files.txt ]; then
+            echo "No XEX files were generated."
+            exit 1
+          fi
+
+      - name: Upload generated XEX files
         uses: actions/upload-artifact@v4
         with:
           name: Xbox360-Cube-Test-XEX
-          path: xsdk/build/samples/cube/cube.xex
+          path: |
+            xsdk/**/*.xex
+            xsdk/*.xex
           if-no-files-found: error
